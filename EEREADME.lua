@@ -1,5 +1,4 @@
 
-
 local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
 local cloneref = cloneref or function(serv) return serv end
@@ -229,44 +228,68 @@ end
 
 utils.purchase = function(type, itemname, last)
     if type == 'weapon' then
-        local weapon = itemname:gsub('%s*%- %$%d+', '')
+        -- strip ให้สะอาด: "[Rifle] - $500" → "Rifle"
+        local weapon = itemname:gsub('%[', ''):gsub('%]', ''):gsub('%s*%- %$%d+', ''):gsub('^%s+', ''):gsub('%s+$', '')
         if lplr.Character:FindFirstChild(weapon) or lplr.Backpack:FindFirstChild(weapon) then return 'owned' end
+
         local shopItem = workspace.Ignored.Shop:FindFirstChild(itemname)
-        local click = shopItem and shopItem:FindFirstChildOfClass('ClickDetector')
-        if not click then return 'nosuch' end
-        local name = itemname:gsub('%[', ''):gsub('%]', ''):gsub('%s*%- %$%d+', '')
-        local head = shopItem:FindFirstChildOfClass('Part') or shopItem:FindFirstChildOfClass('BasePart') or shopItem:FindFirstChild('Head')
-        if not head then return 'nosuch' end
-        local startingmoney = utils.getmoney()
-        local saved = {}
-        for i, v in lplr.Character:GetChildren() do
-            if v:IsA('Tool') then table.insert(saved, v); v.Parent = lplr.Backpack end
-        end
-        local data = pguns[name:lower()]
-        local part
-        local check = false
-        local timeout = tick()
-        if data then
-            for i, v in workspace.Ignored.Shop:GetChildren() do
-                if data.name:lower() == v.Name:lower() then part = v; break end
+        if not shopItem then
+            -- fallback: หาด้วย find ถ้าชื่อไม่ตรงพอดี
+            for _, v in workspace.Ignored.Shop:GetChildren() do
+                if v.Name:lower():find(weapon:lower(), 1, true) then shopItem = v; break end
             end
         end
-        if not part then return 'nosuch' end
+        if not shopItem then return 'nosuch' end
+
+        local click = shopItem:FindFirstChildOfClass('ClickDetector')
+        if not click then return 'nosuch' end
+
+        -- หา part ที่จะ TP ไปหา (ลอง recursive ด้วย)
+        local head = shopItem:FindFirstChildOfClass('BasePart')
+            or shopItem:FindFirstChildOfClass('Part')
+            or shopItem:FindFirstChild('Head')
+        if not head then
+            for _, v in shopItem:GetDescendants() do
+                if v:IsA('BasePart') then head = v; break end
+            end
+        end
+        if not head then return 'nosuch' end
+
+        -- ย้ายปืนออกจาก character ก่อนซื้อ
+        local saved = {}
+        for _, v in lplr.Character:GetChildren() do
+            if v:IsA('Tool') then table.insert(saved, v); v.Parent = lplr.Backpack end
+        end
+
+        local check = false
+        local timeout = tick()
+        local timeoutSec = 3  -- เพิ่ม timeout เป็น 3 วิ
+
         task.spawn(function()
             repeat task.wait()
-                check = startingmoney ~= utils.getmoney() or (lplr.Backpack:FindFirstChild(name) or (lplr.Character and lplr.Character:FindFirstChild(name)))
-            until check or tick() - timeout > 0.9
+                check = lplr.Backpack:FindFirstChild(weapon) ~= nil
+                    or (lplr.Character and lplr.Character:FindFirstChild(weapon) ~= nil)
+            until check or tick() - timeout > timeoutSec
         end)
+
         repeat task.wait()
             utils.update(head.CFrame + Vector3.new(0, 5, 0))
-            if fireclickdetector then fireclickdetector(click) end
-        until check or tick() - timeout > 0.90
+            fireclickdetector(click)
+        until check or tick() - timeout > timeoutSec
+
+        -- คืน tools กลับ
+        for _, v in saved do if v and v.Parent then v.Parent = lplr.Character end end
+
         if not killing and not stomping then
             utils.update(CFrame.new(x(), yy(), x()))
         end
-        for i, v in saved do if v then v.Parent = lplr.Character end end
+
         local tool = lplr.Backpack:FindFirstChild(weapon) or lplr.Character:FindFirstChild(weapon)
-        if tool then tool.Parent = lplr.Character; table.insert(guns, tool); return 'success' end
+        if tool then
+            tool.Parent = lplr.Character
+            if not table.find(guns, tool) then table.insert(guns, tool) end
+            return 'success'
+        end
         return 'failed'
     elseif type == 'ammo' then
         local match = string.match(itemname, '%[([A-Za-z]+)%]')
