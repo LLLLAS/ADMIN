@@ -462,9 +462,7 @@ _combatConn = runservice.Heartbeat:Connect(function()
         if localent.Alive and target and killing then
             if bodyeffects.get(lplr, 'Reload') then utils.update(CFrame.new(x(), yy(), x())); return end
             if bodyeffects.get(target, 'K.O') or not players:FindFirstChild(target.Name) then return end
-
-            local target_position = utils:getposition(target)
-            if not target_position or not target.Character then return end
+            if not target.Character then return end
 
             -- Buy guns if we have none
             if #guns == 0 then
@@ -506,17 +504,21 @@ _combatConn = runservice.Heartbeat:Connect(function()
 
             local hum = target.Character.Humanoid
             if not hum then return end
-            info.Text = 'shooting (' .. target.Name .. ') | hp: ' .. math.floor((hum.Health / hum.MaxHealth) * 100) .. '%'
-
-            -- TP on top of target every frame (no TP = we still shoot from above)
-            local tpos = target_position.p
-            utils.update(CFrame.new(tpos + Vector3.new(0, 7, 0)))
 
             local head = target.Character:FindFirstChild('Head')
-            if not head then return end
+            local root = target.Character:FindFirstChild('HumanoidRootPart')
+            if not head or not root then return end
+
+            info.Text = 'shooting (' .. target.Name .. ') | hp: ' .. math.floor((hum.Health / hum.MaxHealth) * 100) .. '%'
+
+            -- Always read LIVE position every shot — never use cached tpos
+            -- This tracks targets through server TPs, flings, movement hacks, etc.
+            local livePos = root.Position
+
+            -- Lock bot directly on top of target (re-TP every frame = no escape)
+            utils.update(CFrame.new(livePos + Vector3.new(0, 5, 0)))
 
             -- Burst: fire ALL guns, 6 shots each per Heartbeat tick
-            -- At 60hz this = ~360 shots/sec → KO in well under 1 second
             for _, v in guns do
                 if not lplr or not lplr.Character or not target or not target.Character then break end
                 v.Parent = lplr.Character
@@ -527,11 +529,12 @@ _combatConn = runservice.Heartbeat:Connect(function()
                     continue
                 end
 
-                -- 6 rapid shots per gun per frame
+                -- Re-read live position PER SHOT so each bullet tracks current location
                 for _ = 1, 6 do
+                    local shotPos = root.Position  -- live read each iteration
                     utils.shoot({
-                        startposition = tpos + Vector3.new(0, seed:NextNumber(2, 6), 0),
-                        position      = tpos,
+                        startposition = shotPos + Vector3.new(0, seed:NextNumber(2, 5), 0),
+                        position      = shotPos,
                         part          = head,
                         tool          = v,
                     })
