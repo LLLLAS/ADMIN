@@ -471,20 +471,9 @@ _combatConn = runservice.Heartbeat:Connect(function()
                 return
             end
 
-            -- Buy guns if we have none
+            -- Buy guns if we have none (handled by separate task below)
             if #guns == 0 then
-                local dg = altcontrol.default_guns or {'rifle', 'flintlock'}
-                for i, v in dg do
-                    if pguns[v] then
-                        local status = pguns[v]
-                        if not status or not localent.Alive then continue end
-                        local weapon = status.name:gsub('%s*%- %$%d+', '')
-                        if lplr.Backpack and lplr.Character and not lplr.Backpack:FindFirstChild(weapon) and not lplr.Character:FindFirstChild(weapon) then
-                            info.Text = 'buying ' .. v
-                            utils.purchase('weapon', status.name)
-                        end
-                    end
-                end
+                info.Text = 'waiting for guns...'
                 return
             end
 
@@ -643,6 +632,46 @@ task.spawn(function()
                         v.Parent = lplr.Backpack; task.wait(1)
                     end
                 end
+            end
+        end)
+    until not game
+end)
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- AUTO BUY GUN — แยก task เพราะ purchase() ต้องใช้ yield (ใช้ใน Heartbeat ไม่ได้)
+-- ══════════════════════════════════════════════════════════════════════════════
+task.spawn(function()
+    repeat task.wait(0.5)
+        pcall(function()
+            if not localent.Alive then return end
+            if #guns > 0 then return end -- มีปืนแล้ว ไม่ต้องซื้อ
+
+            local dg = altcontrol.default_guns or {'rifle', 'flintlock'}
+            for _, gunkey in dg do
+                -- pguns key คือ lowercase ชื่อเต็ม เช่น "[rifle] - $500"
+                -- ต้อง search หาว่า key ไหน contain gunkey
+                local status = pguns[gunkey]
+                if not status then
+                    -- fallback: หา key ที่ contain gunkey
+                    for k, v in pguns do
+                        if k:find(gunkey, 1, true) then status = v; break end
+                    end
+                end
+                if not status then continue end
+
+                local weapon = status.name:gsub('%[', ''):gsub('%]', ''):gsub('%s*%- %$%d+', ''):gsub('^%s+', ''):gsub('%s+$', '')
+                local alreadyHave = (lplr.Backpack and lplr.Backpack:FindFirstChild(weapon))
+                    or (lplr.Character and lplr.Character:FindFirstChild(weapon))
+                if alreadyHave then continue end
+
+                info.Text = 'buying ' .. gunkey
+                local result = utils.purchase('weapon', status.name)
+                if result == 'success' then
+                    info.Text = 'bought ' .. gunkey
+                elseif result == 'nosuch' then
+                    warn('[ZeroHub] buy failed: nosuch — ' .. status.name)
+                end
+                task.wait(0.3)
             end
         end)
     until not game
