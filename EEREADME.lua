@@ -1310,3 +1310,212 @@ end
 loadanimation(default)
 task.spawn(connectWS)
 wsLog('Loaded! Player: ' .. lplr.Name)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- OWNER CONTROL UI — only shows if current player is in owners list
+-- ═══════════════════════════════════════════════════════════════════════════
+if table.find(altcontrol.owners, lplr.Name) then
+    task.spawn(function()
+        local UIS = game:GetService("UserInputService")
+        local spamTargets = {}
+
+        local ScreenGui = Instance.new("ScreenGui")
+        ScreenGui.Name = "CPOwner"
+        ScreenGui.ResetOnSpawn = false
+        if syn and syn.protect_gui then syn.protect_gui(ScreenGui) end
+        if gethui then ScreenGui.Parent = gethui() else ScreenGui.Parent = game:GetService("CoreGui") end
+
+        local Main = Instance.new("Frame", ScreenGui)
+        Main.Size = UDim2.new(0, 300, 0, 400)
+        Main.Position = UDim2.new(0, 100, 0.5, -200)
+        Main.BackgroundColor3 = Color3.fromRGB(12, 12, 20)
+        Main.BorderSizePixel = 0
+        Main.Visible = true
+        Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 10)
+        local stroke = Instance.new("UIStroke", Main)
+        stroke.Color = Color3.fromRGB(40, 40, 70)
+        stroke.Thickness = 1
+
+        -- Title
+        local TBar = Instance.new("Frame", Main)
+        TBar.Size = UDim2.new(1, 0, 0, 32)
+        TBar.BackgroundColor3 = Color3.fromRGB(16, 16, 28)
+        TBar.BorderSizePixel = 0
+        Instance.new("UICorner", TBar).CornerRadius = UDim.new(0, 10)
+        local TLabel = Instance.new("TextLabel", TBar)
+        TLabel.Size = UDim2.new(1, -10, 1, 0)
+        TLabel.Position = UDim2.new(0, 10, 0, 0)
+        TLabel.BackgroundTransparency = 1
+        TLabel.Text = "CatPrivate Control"
+        TLabel.TextColor3 = Color3.fromRGB(124, 106, 255)
+        TLabel.TextXAlignment = Enum.TextXAlignment.Left
+        TLabel.Font = Enum.Font.GothamBold
+        TLabel.TextSize = 13
+
+        -- Player Scroll
+        local Scroll = Instance.new("ScrollingFrame", Main)
+        Scroll.Size = UDim2.new(1, -12, 1, -80)
+        Scroll.Position = UDim2.new(0, 6, 0, 38)
+        Scroll.BackgroundColor3 = Color3.fromRGB(10, 10, 18)
+        Scroll.BorderSizePixel = 0
+        Scroll.ScrollBarThickness = 3
+        Scroll.ScrollBarImageColor3 = Color3.fromRGB(124, 106, 255)
+        Instance.new("UICorner", Scroll).CornerRadius = UDim.new(0, 8)
+        local Layout = Instance.new("UIListLayout", Scroll)
+        Layout.Padding = UDim.new(0, 3)
+
+        -- Bottom
+        local Bot = Instance.new("Frame", Main)
+        Bot.Size = UDim2.new(1, -12, 0, 28)
+        Bot.Position = UDim2.new(0, 6, 1, -34)
+        Bot.BackgroundTransparency = 1
+
+        local function mkBtn(text, color, pos, cb)
+            local b = Instance.new("TextButton", Bot)
+            b.Size = UDim2.new(0.48, 0, 1, 0)
+            b.Position = pos
+            b.BackgroundColor3 = color
+            b.BorderSizePixel = 0
+            b.Text = text
+            b.TextColor3 = Color3.new(1,1,1)
+            b.Font = Enum.Font.GothamBold
+            b.TextSize = 10
+            Instance.new("UICorner", b).CornerRadius = UDim.new(0, 5)
+            b.MouseButton1Click:Connect(cb)
+        end
+
+        mkBtn("Kill All", Color3.fromRGB(200, 40, 60), UDim2.new(0,0,0,0), function()
+            if wsSocket then wsSend({type='log', msg='[owner] Kill All'}) end
+            for _, p in players:GetPlayers() do
+                if p ~= lplr and not table.find(altcontrol.owners, p.Name) and not table.find(whitelist, p.Name) then
+                    target = p; killing = true
+                    repeat task.wait() until not killing or stop
+                    target = nil
+                end
+            end
+        end)
+
+        mkBtn("Stop", Color3.fromRGB(60, 60, 100), UDim2.new(0.52,0,0,0), function()
+            target = nil; killing = false; stomping = false
+            spamTargets = {}
+        end)
+
+        local function makeCard(plr)
+            if plr == lplr or table.find(altcontrol.owners, plr.Name) then return end
+            local card = Instance.new("Frame", Scroll)
+            card.Name = "P_" .. plr.Name
+            card.Size = UDim2.new(1, -6, 0, 48)
+            card.BackgroundColor3 = Color3.fromRGB(16, 16, 30)
+            card.BorderSizePixel = 0
+            Instance.new("UICorner", card).CornerRadius = UDim.new(0, 6)
+
+            local nm = Instance.new("TextLabel", card)
+            nm.Size = UDim2.new(1, 0, 0, 16)
+            nm.Position = UDim2.new(0, 6, 0, 2)
+            nm.BackgroundTransparency = 1
+            nm.Text = plr.DisplayName .. " (@" .. plr.Name .. ")"
+            nm.TextColor3 = Color3.fromRGB(220, 218, 230)
+            nm.Font = Enum.Font.GothamBold
+            nm.TextSize = 10
+            nm.TextXAlignment = Enum.TextXAlignment.Left
+
+            local function btn(text, col, px, cb)
+                local b = Instance.new("TextButton", card)
+                b.Size = UDim2.new(0, 38, 0, 16)
+                b.Position = UDim2.new(0, px, 0, 24)
+                b.BackgroundColor3 = col
+                b.BorderSizePixel = 0
+                b.Text = text
+                b.TextColor3 = Color3.new(1,1,1)
+                b.Font = Enum.Font.GothamBold
+                b.TextSize = 9
+                Instance.new("UICorner", b).CornerRadius = UDim.new(0, 4)
+                b.MouseButton1Click:Connect(cb)
+                return b
+            end
+
+            btn("Kill", Color3.fromRGB(180, 40, 60), 6, function()
+                target = plr; killing = true
+            end)
+            btn("Stomp", Color3.fromRGB(140, 60, 30), 48, function()
+                target = plr; stomping = true
+            end)
+            btn("TP", Color3.fromRGB(50, 70, 150), 90, function()
+                pcall(function()
+                    if lplr.Character and plr.Character then
+                        lplr.Character.HumanoidRootPart.CFrame = plr.Character.HumanoidRootPart.CFrame
+                    end
+                end)
+            end)
+            btn("Bring", Color3.fromRGB(40, 120, 70), 132, function()
+                pcall(function()
+                    if lplr.Character and plr.Character then
+                        plr.Character.HumanoidRootPart.CFrame = lplr.Character.HumanoidRootPart.CFrame + Vector3.new(3,0,0)
+                    end
+                end)
+            end)
+            local spamBtn = btn("Spam", Color3.fromRGB(140, 50, 140), 174, function() end)
+            spamBtn.MouseButton1Click:Connect(function()
+                if spamTargets[plr.Name] then
+                    spamTargets[plr.Name] = nil
+                    spamBtn.Text = "Spam"
+                    spamBtn.BackgroundColor3 = Color3.fromRGB(140, 50, 140)
+                else
+                    spamTargets[plr.Name] = true
+                    spamBtn.Text = "Stop"
+                    spamBtn.BackgroundColor3 = Color3.fromRGB(200, 40, 40)
+                end
+            end)
+        end
+
+        local function refresh()
+            for _, c in Scroll:GetChildren() do if c:IsA("Frame") then c:Destroy() end end
+            for _, p in players:GetPlayers() do makeCard(p) end
+            Scroll.CanvasSize = UDim2.new(0, 0, 0, Layout.AbsoluteContentSize.Y + 6)
+        end
+
+        refresh()
+        players.PlayerAdded:Connect(function() task.wait(1) refresh() end)
+        players.PlayerRemoving:Connect(function(p) spamTargets[p.Name] = nil task.wait(0.5) refresh() end)
+
+        -- Spam loop
+        task.spawn(function()
+            while true do
+                task.wait(0.5)
+                for name, _ in pairs(spamTargets) do
+                    local p = players:FindFirstChild(name)
+                    if p and p.Character then
+                        target = p; killing = true
+                    else
+                        spamTargets[name] = nil
+                    end
+                end
+            end
+        end)
+
+        -- Toggle
+        UIS.InputBegan:Connect(function(input, gpe)
+            if gpe then return end
+            if input.KeyCode == Enum.KeyCode.RightShift then
+                Main.Visible = not Main.Visible
+            end
+        end)
+
+        -- Drag
+        local dragging, dragStart, startPos
+        TBar.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = true; dragStart = input.Position; startPos = Main.Position
+                input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
+            end
+        end)
+        UIS.InputChanged:Connect(function(input)
+            if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+                local d = input.Position - dragStart
+                Main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+            end
+        end)
+
+        wsLog('Owner UI loaded — RightShift to toggle')
+    end)
+end
