@@ -261,7 +261,9 @@ utils.purchase = function(type, itemname, last)
             utils.update(head.CFrame + Vector3.new(0, 5, 0))
             if fireclickdetector then fireclickdetector(click) end
         until check or tick() - timeout > 0.90
-        utils.update(CFrame.new(x(), yy(), x()))
+        if not killing and not stomping then
+            utils.update(CFrame.new(x(), yy(), x()))
+        end
         for i, v in saved do if v then v.Parent = lplr.Character end end
         local tool = lplr.Backpack:FindFirstChild(weapon) or lplr.Character:FindFirstChild(weapon)
         if tool then tool.Parent = lplr.Character; table.insert(guns, tool); return 'success' end
@@ -644,18 +646,15 @@ task.spawn(function()
     repeat task.wait(0.5)
         pcall(function()
             if not localent.Alive then return end
-            if #guns > 0 then return end -- มีปืนแล้ว ไม่ต้องซื้อ
+            if #guns > 0 then return end
 
             local dg = altcontrol.default_guns or {'rifle', 'flintlock'}
             for _, gunkey in dg do
-                -- pguns key คือ lowercase ชื่อเต็ม เช่น "[rifle] - $500"
-                -- ต้อง search หาว่า key ไหน contain gunkey
-                local status = pguns[gunkey]
-                if not status then
-                    -- fallback: หา key ที่ contain gunkey
-                    for k, v in pguns do
-                        if k:find(gunkey, 1, true) then status = v; break end
-                    end
+                -- pguns key คือ label:lower() เช่น "rifle", "flintlock pistol"
+                -- ใช้ find เพื่อรองรับชื่อที่ไม่ตรงทั้งหมด เช่น 'flintlock' match 'flintlock pistol'
+                local status = nil
+                for k, v in pguns do
+                    if k:find(gunkey, 1, true) then status = v; break end
                 end
                 if not status then continue end
 
@@ -665,12 +664,7 @@ task.spawn(function()
                 if alreadyHave then continue end
 
                 info.Text = 'buying ' .. gunkey
-                local result = utils.purchase('weapon', status.name)
-                if result == 'success' then
-                    info.Text = 'bought ' .. gunkey
-                elseif result == 'nosuch' then
-                    warn('[ZeroHub] buy failed: nosuch — ' .. status.name)
-                end
+                utils.purchase('weapon', status.name)
                 task.wait(0.3)
             end
         end)
@@ -830,26 +824,63 @@ task.spawn(function()
 end)
 
 -- ══════════════════════════════════════════════════════════════════════════════
--- INSTANT SENTRY + ASSIST  (Heartbeat HP delta — reacts in <1 frame, ~60Hz)
--- Replaces ClientBullet (misses bullets that don't hit) + 0.15s poll (too slow)
+-- INSTANT SENTRY + ASSIST  — Queue-based, kill+stomp ทุกคน ไม่หยุด
 -- ══════════════════════════════════════════════════════════════════════════════
-local _sentryHP = {}   -- [ownerName]  = last hp
-local _assistHP = {}   -- [playerName] = last hp
+local _sentryHP  = {}
+local _assistHP  = {}
+local _engageQueue = {}      -- {name, reason} รอฆ่าต่อคิว
+local _engageBusy  = false   -- กำลังประมวลผล queue อยู่
 
-local function fastEngage(plr, reason)
+-- เพิ่ม target เข้า queue (ไม่ซ้ำ)
+local function queueEngage(plr, reason)
     if not plr or not plr.Character then return end
     if bodyeffects.get(plr, 'K.O') or bodyeffects.get(plr, 'SDeath') then return end
     if plr.Character:FindFirstChildOfClass('ForceField') then return end
-    pcall(function() wsSend({type='log', msg='[' .. reason .. '] engaging ' .. plr.Name}) end)
-    target  = plr
-    killing = true
+    -- ไม่เพิ่มซ้ำ
+    for _, e in _engageQueue do
+        if e.name == plr.Name then return end
+    end
+    table.insert(_engageQueue, {name = plr.Name, reason = reason})
+    pcall(function() wsSend({type='log', msg='[' .. reason .. '] queued ' .. plr.Name .. ' (' .. #_engageQueue .. ' in queue)'}) end)
 end
 
+-- Worker loop: ดึง queue มาฆ่า+stomp ทีละคน วนไม่หยุด
+task.spawn(function()
+    while true do
+        task.wait(0.05)
+        if stop or #_engageQueue == 0 or killing or stomping then continue end
+
+        local entry = table.remove(_engageQueue, 1)
+        local plr = players:FindFirstChild(entry.name)
+        if not plr or not plr.Character then continue end
+        if bodyeffects.get(plr, 'K.O') or bodyeffects.get(plr, 'SDeath') then continue end
+        if plr.Character:FindFirstChildOfClass('ForceField') then continue end
+
+        pcall(function() wsSend({type='log', msg='[' .. entry.reason .. '] killing ' .. entry.name .. ' (' .. #_engageQueue .. ' left)'}) end)
+
+        -- Kill
+        target = plr; killing = true
+        repeat task.wait(0.05) until not killing or stop or not players:FindFirstChild(entry.name)
+
+        -- Auto stomp หลัง kill เสร็จ
+        local deadPlr = players:FindFirstChild(entry.name)
+        if deadPlr and bodyeffects.get(deadPlr, 'K.O') and not bodyeffects.get(deadPlr, 'SDeath') then
+            pcall(function() wsSend({type='log', msg='[' .. entry.reason .. '] stomping ' .. entry.name}) end)
+            target = deadPlr; stomping = true
+            repeat task.wait(0.05) until not stomping or stop or bodyeffects.get(deadPlr, 'SDeath') or not players:FindFirstChild(entry.name)
+        end
+
+        target = nil
+        task.wait(0.1)
+    end
+end)
+
+-- HP watcher: detect damage แล้วยัด queue ทันที (Heartbeat = ~60Hz)
 runservice.Heartbeat:Connect(function()
     if stop then return end
     pcall(function()
 
-        -- SENTRY: owner HP dropped → find closest attacker and kill them NOW
+        -- SENTRY: owner HP ลด → หาคนที่ใกล้ที่สุดแล้ว queue
         if sentry then
             for _, ownerName in altcontrol.owners do
                 local owner = players:FindFirstChild(ownerName)
@@ -862,8 +893,9 @@ runservice.Heartbeat:Connect(function()
                 local prev = _sentryHP[ownerName] or hp
                 _sentryHP[ownerName] = hp
 
-                if hp < prev and hp > 0 and not killing and not stomping then
-                    local closest, closestDist = nil, 60
+                if hp < prev and hp > 0 then
+                    -- หาคนที่ใกล้ owner ที่สุด (ผู้โจมตี)
+                    local closest, closestDist = nil, 80
                     for _, v in players:GetPlayers() do
                         if v == lplr or table.find(altcontrol.owners, v.Name) or table.find(whitelist, v.Name) then continue end
                         if not v.Character or not v.Character:FindFirstChild('HumanoidRootPart') then continue end
@@ -871,13 +903,13 @@ runservice.Heartbeat:Connect(function()
                         local d = (root.Position - v.Character.HumanoidRootPart.Position).Magnitude
                         if d < closestDist then closest = v; closestDist = d end
                     end
-                    if closest then fastEngage(closest, 'sentry') end
+                    if closest then queueEngage(closest, 'sentry') end
                 end
             end
         end
 
-        -- ASSIST: enemy HP dropped while owner is nearby → bot finishes them
-        if assist and not killing and not stomping then
+        -- ASSIST: enemy HP ลดขณะ owner อยู่ใกล้ → queue
+        if assist then
             for _, v in players:GetPlayers() do
                 if v == lplr or table.find(altcontrol.owners, v.Name) or table.find(whitelist, v.Name) then continue end
                 if not v.Character or not v.Character:FindFirstChild('Humanoid') or not v.Character:FindFirstChild('HumanoidRootPart') then
@@ -896,14 +928,15 @@ runservice.Heartbeat:Connect(function()
                         local owner = players:FindFirstChild(ownerName)
                         if owner and owner.Character and owner.Character:FindFirstChild('HumanoidRootPart') then
                             local d = (owner.Character.HumanoidRootPart.Position - v.Character.HumanoidRootPart.Position).Magnitude
-                            if d < 50 then
-                                fastEngage(v, 'assist')
+                            if d < 60 then
+                                queueEngage(v, 'assist')
                                 break
                             end
                         end
                     end
                 end
             end
+            -- ล้าง stale entries
             for name in pairs(_assistHP) do
                 if not players:FindFirstChild(name) then _assistHP[name] = nil end
             end
@@ -1002,6 +1035,7 @@ local function handleCommand(cmd, args)
         killing = false; stop = true; stomping = false; auto = false; target = nil; info.Text = ''
         ka = false; showtarget = nil; show = false; assist = false; void = true; sentry = false
         farming = false; multikilling = false; noclip = false
+        _engageQueue = {}
         pcall(function() camera.CameraSubject = lplr.Character.Humanoid; utils.update(CFrame.new(x(), yy(), x())) end)
         stop = false; wsSend({type='log', msg='Stopped'})
     elseif cmd == 'guns' then
