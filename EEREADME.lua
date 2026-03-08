@@ -538,10 +538,11 @@ _combatConn = runservice.Heartbeat:Connect(function()
 
                 -- Re-read live position PER SHOT so each bullet tracks current location
                 for _ = 1, 6 do
-                    local shotPos = root.Position  -- live read each iteration
+                    local headPos = head.Position      -- ใช้ head.Position ตรงๆ
+                    local gunPos  = headPos + Vector3.new(0, seed:NextNumber(3, 6), 0)
                     utils.shoot({
-                        startposition = shotPos + Vector3.new(0, seed:NextNumber(2, 5), 0),
-                        position      = shotPos,
+                        startposition = gunPos,
+                        position      = headPos,   -- ต้องตรงกับ part ที่ส่ง
                         part          = head,
                         tool          = v,
                     })
