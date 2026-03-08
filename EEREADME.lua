@@ -1,4 +1,3 @@
-
 local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
 local cloneref = cloneref or function(serv) return serv end
