@@ -342,6 +342,7 @@ local flamethrower = false
 local auto = false
 local farming = false
 local multikilling = false
+local noclip = false
 
 local showtarget = altcontrol.owners[1] or nil
 local show = showtarget ~= nil
@@ -460,9 +461,15 @@ _combatConn = runservice.Heartbeat:Connect(function()
     pcall(function()
         -- ── KILL ──────────────────────────────────────────────────────────────
         if localent.Alive and target and killing then
-            if bodyeffects.get(lplr, 'Reload') then utils.update(CFrame.new(x(), yy(), x())); return end
             if bodyeffects.get(target, 'K.O') or not players:FindFirstChild(target.Name) then return end
             if not target.Character then return end
+
+            -- Still reloading — stay ON TOP of target, don't void
+            if bodyeffects.get(lplr, 'Reload') then
+                local stayRoot = target.Character:FindFirstChild('HumanoidRootPart')
+                if stayRoot then utils.update(CFrame.new(stayRoot.Position + Vector3.new(0, 5, 0))) end
+                return
+            end
 
             -- Buy guns if we have none
             if #guns == 0 then
@@ -545,7 +552,11 @@ _combatConn = runservice.Heartbeat:Connect(function()
 
         -- ── STOMP ─────────────────────────────────────────────────────────────
         if stomping and target and target.Character then
-            if bodyeffects.get(lplr, 'Reload') then utils.update(CFrame.new(x(), yy(), x())); return end
+            if bodyeffects.get(lplr, 'Reload') then
+                local stayRoot = target.Character:FindFirstChild('HumanoidRootPart')
+                if stayRoot then utils.update(CFrame.new(stayRoot.Position + Vector3.new(0, 5, 0))) end
+                return
+            end
             for i, v in lplr.Character:GetChildren() do if v:IsA('Tool') then v.Parent = lplr.Backpack end end
             info.Text = 'stomping (' .. target.Name .. ')'
             local lt = target.Character:FindFirstChild('LowerTorso') or target.Character:FindFirstChild('HumanoidRootPart')
@@ -739,6 +750,22 @@ task.spawn(function()
             end
         end)
     until not game
+end)
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- NOCLIP — ทำให้ลอดกำแพง/พื้น ได้ทุก part ใน character
+-- ══════════════════════════════════════════════════════════════════════════════
+runservice.Stepped:Connect(function()
+    if not noclip then return end
+    pcall(function()
+        if lplr.Character then
+            for _, part in lplr.Character:GetDescendants() do
+                if part:IsA('BasePart') and part.CanCollide then
+                    part.CanCollide = false
+                end
+            end
+        end
+    end)
 end)
 
 -- Anti-stomp sentry: if owner gets KO'd, kill whoever is near them (stomping)
@@ -944,7 +971,7 @@ local function handleCommand(cmd, args)
     elseif cmd == 'stop' then
         killing = false; stop = true; stomping = false; auto = false; target = nil; info.Text = ''
         ka = false; showtarget = nil; show = false; assist = false; void = true; sentry = false
-        farming = false; multikilling = false
+        farming = false; multikilling = false; noclip = false
         pcall(function() camera.CameraSubject = lplr.Character.Humanoid; utils.update(CFrame.new(x(), yy(), x())) end)
         stop = false; wsSend({type='log', msg='Stopped'})
     elseif cmd == 'guns' then
@@ -1013,6 +1040,17 @@ local function handleCommand(cmd, args)
     elseif cmd == 'leave' then wsSend({type='log', msg='Leaving...'}); lplr:Kick('[ZeroHub AltBot] Kicked via panel')
     elseif cmd == 'reset' then pcall(function() lplr.Character.Humanoid.Health = 0 end); wsSend({type='log', msg='Reset'})
     elseif cmd == 'emote' then local e = targetName:lower(); if anims[e] then loadanimation(anims[e]); wsSend({type='log', msg='Emote: ' .. e}) end
+    elseif cmd == 'noclip' then
+        noclip = not noclip
+        -- ถ้าปิด noclip ให้ restore CanCollide กลับ
+        if not noclip and lplr.Character then
+            pcall(function()
+                for _, part in lplr.Character:GetDescendants() do
+                    if part:IsA('BasePart') then part.CanCollide = true end
+                end
+            end)
+        end
+        wsSend({type='log', msg=(noclip and 'ON' or 'OFF') .. ' noclip'})
     elseif cmd == 'weld' then weld = not weld; wsSend({type='log', msg=(weld and 'ON' or 'OFF') .. ' weld'})
     elseif cmd == 'punch' then punch = not punch; wsSend({type='log', msg=(punch and 'ON' or 'OFF') .. ' punch'})
     elseif cmd == 'flame' then flamethrower = not flamethrower; wsSend({type='log', msg=(flamethrower and 'ON' or 'OFF') .. ' flame'})
@@ -1350,9 +1388,9 @@ if table.find(altcontrol.owners, lplr.Name) then
         Bot.Position = UDim2.new(0, 6, 1, -34)
         Bot.BackgroundTransparency = 1
 
-        local function mkBtn(text, color, pos, cb)
+        local function mkBtn(text, color, pos, size, cb)
             local b = Instance.new("TextButton", Bot)
-            b.Size = UDim2.new(0.48, 0, 1, 0)
+            b.Size = size
             b.Position = pos
             b.BackgroundColor3 = color
             b.BorderSizePixel = 0
@@ -1362,9 +1400,10 @@ if table.find(altcontrol.owners, lplr.Name) then
             b.TextSize = 10
             Instance.new("UICorner", b).CornerRadius = UDim.new(0, 5)
             b.MouseButton1Click:Connect(cb)
+            return b
         end
 
-        mkBtn("Kill All", Color3.fromRGB(200, 40, 60), UDim2.new(0,0,0,0), function()
+        mkBtn("Kill All", Color3.fromRGB(200, 40, 60), UDim2.new(0,0,0,0), UDim2.new(0.31,0,1,0), function()
             if wsSocket then wsSend({type='log', msg='[owner] Kill All'}) end
             for _, p in players:GetPlayers() do
                 if p ~= lplr and not table.find(altcontrol.owners, p.Name) and not table.find(whitelist, p.Name) then
@@ -1375,8 +1414,23 @@ if table.find(altcontrol.owners, lplr.Name) then
             end
         end)
 
-        mkBtn("Stop", Color3.fromRGB(60, 60, 100), UDim2.new(0.52,0,0,0), function()
-            target = nil; killing = false; stomping = false
+        local noclipBtn = mkBtn("Noclip", Color3.fromRGB(30, 100, 160), UDim2.new(0.34,0,0,0), UDim2.new(0.31,0,1,0), function() end)
+        noclipBtn.MouseButton1Click:Connect(function()
+            noclip = not noclip
+            if not noclip and lplr.Character then
+                pcall(function()
+                    for _, part in lplr.Character:GetDescendants() do
+                        if part:IsA('BasePart') then part.CanCollide = true end
+                    end
+                end)
+            end
+            noclipBtn.Text = noclip and "Noclip ON" or "Noclip"
+            noclipBtn.BackgroundColor3 = noclip and Color3.fromRGB(20, 200, 100) or Color3.fromRGB(30, 100, 160)
+        end)
+
+        mkBtn("Stop", Color3.fromRGB(60, 60, 100), UDim2.new(0.68,0,0,0), UDim2.new(0.32,0,1,0), function()
+            target = nil; killing = false; stomping = false; noclip = false
+            noclipBtn.Text = "Noclip"; noclipBtn.BackgroundColor3 = Color3.fromRGB(30, 100, 160)
             spamTargets = {}
         end)
 
