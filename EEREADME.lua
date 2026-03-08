@@ -150,8 +150,8 @@ end
 -- UTILS
 -- ══════════════════════════════════════════════════════════════════════════════
 local seed = Random.new()
-local x = function() return seed:NextNumber(-3000, 3000) end
-local yy = function() return seed:NextNumber(2500, 3800) end
+local x  = function() return seed:NextNumber(-4000, 4000) end
+local yy = function() return seed:NextNumber(9e6, 9.1e6) end
 
 utils.shoot = function(args)
     replicated.MainEvent:FireServer('ShootGun', args.tool:FindFirstChild('Handle'), args.startposition, args.position, args.part, Vector3.zero)
@@ -164,7 +164,10 @@ end
 utils.update = function(position)
     position = typeof(position) == 'Vector3' and CFrame.new(position) or position
     if lplr and lplr.Character and lplr.Character:FindFirstChild('HumanoidRootPart') and position then
-        lplr.Character.HumanoidRootPart.CFrame = position
+        local hrp = lplr.Character.HumanoidRootPart
+        hrp.CFrame = position
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
     end
 end
 
@@ -227,13 +230,12 @@ end
 
 utils.purchase = function(type, itemname, last)
     if type == 'weapon' then
-        -- strip ให้สะอาด รวม [] ด้วย
-        local weapon = itemname:gsub('%[', ''):gsub('%]', ''):gsub('%s*%- %$%d+', ''):gsub('^%s+', ''):gsub('%s+$', '')
+        local weapon = itemname:gsub('%s*%- %$%d+', '')
         if lplr.Character:FindFirstChild(weapon) or lplr.Backpack:FindFirstChild(weapon) then return 'owned' end
         local shopItem = workspace.Ignored.Shop:FindFirstChild(itemname)
         local click = shopItem and shopItem:FindFirstChildOfClass('ClickDetector')
         if not click then return 'nosuch' end
-        local name = weapon
+        local name = itemname:gsub('%[', ''):gsub('%]', ''):gsub('%s*%- %$%d+', '')
         local head = shopItem:FindFirstChildOfClass('Part') or shopItem:FindFirstChildOfClass('BasePart') or shopItem:FindFirstChild('Head')
         if not head then return 'nosuch' end
         local startingmoney = utils.getmoney()
@@ -256,15 +258,11 @@ utils.purchase = function(type, itemname, last)
                 check = startingmoney ~= utils.getmoney() or (lplr.Backpack:FindFirstChild(name) or (lplr.Character and lplr.Character:FindFirstChild(name)))
             until check or tick() - timeout > 0.9
         end)
-        -- void ก่อนเสมอ ป้องกันโดนยิงระหว่างรอ
-        utils.update(CFrame.new(x(), yy(), x()))
-        task.wait(0.05)
         repeat task.wait()
-            -- TP ไปหา shop แป๊บเดียว → click → void กลับทันที
             utils.update(head.CFrame + Vector3.new(0, 5, 0))
             if fireclickdetector then fireclickdetector(click) end
-            utils.update(CFrame.new(x(), yy(), x()))
         until check or tick() - timeout > 0.90
+        utils.update(CFrame.new(x(), yy(), x()))
         for i, v in saved do if v then v.Parent = lplr.Character end end
         local tool = lplr.Backpack:FindFirstChild(weapon) or lplr.Character:FindFirstChild(weapon)
         if tool then tool.Parent = lplr.Character; table.insert(guns, tool); return 'success' end
@@ -457,113 +455,99 @@ task.spawn(function()
     until not game
 end)
 
--- Main combat loop — Heartbeat for max fire rate, live head tracking
-runservice.Heartbeat:Connect(function()
-    pcall(function()
-        if localent.Alive and target and killing then
-            -- reloading → TP ติด target ไว้ ไม่ void
-            if bodyeffects.get(lplr, 'Reload') then
-                local r = target.Character and target.Character:FindFirstChild('HumanoidRootPart')
-                if r then utils.update(CFrame.new(r.Position + Vector3.new(0, 5, 0))) end
-                return
-            end
-            if bodyeffects.get(target, 'K.O') or not players:FindFirstChild(target.Name) then return end
-            if not target.Character then return end
-
-            -- Buy guns if we have none (handled by separate task below)
-            if #guns == 0 then info.Text = 'waiting for guns...'; return end
-
-            if target.Character:FindFirstChildOfClass('ForceField') then
-                info.Text = 'target has forcefield - waiting'
-                utils.update(CFrame.new(x(), yy(), x())); return
-            end
-
-            if target.Character:FindFirstChild('Humanoid') then
-                camera.CameraSubject = target.Character.Humanoid
-            end
-
-            if target.Character:FindFirstChild('GRABBING_CONSTRAINT') then
-                local a = target.Character:FindFirstChild('GRABBING_CONSTRAINT')
-                if a:GetAttribute('PLAYER_HOLD') then
-                    local nt = utils.getname(a:GetAttribute('PLAYER_HOLD'))
-                    if nt then target = nt end
-                end
-            end
-
-            local hum = target.Character:FindFirstChild('Humanoid')
-            local head = target.Character:FindFirstChild('Head')
-            local root = target.Character:FindFirstChild('HumanoidRootPart')
-            if not hum or not head or not root then return end
-
-            info.Text = 'shooting (' .. target.Name .. ') | hp: ' .. math.floor((hum.Health / hum.MaxHealth) * 100) .. '%'
-
-            -- TP ติด target ทุก frame ไม่มีทางหนี
-            utils.update(CFrame.new(root.Position + Vector3.new(0, 5, 0)))
-
-            for _, v in guns do
-                if not lplr or not lplr.Character or not target or not target.Character then break end
-                v.Parent = lplr.Character
-                if not v or not v:FindFirstChild('Ammo') or buyinammo then continue end
-                if v.Ammo.Value == 0 then
-                    if utils.getfullammo(v) ~= 0 then utils.reload(v) end
-                    continue
-                end
-                -- 6 shots per gun per frame, ใช้ head.Position live ทุก shot
-                for _ = 1, 6 do
-                    local hp = head.Position
-                    utils.shoot({
-                        startposition = hp + Vector3.new(0, seed:NextNumber(2, 5), 0),
-                        position      = hp,
-                        part          = head,
-                        tool          = v,
-                    })
-                end
-            end
-            return
-        end
-
-        if stomping and target and target.Character then
-            if bodyeffects.get(lplr, 'Reload') then
-                local r = target.Character:FindFirstChild('HumanoidRootPart')
-                if r then utils.update(CFrame.new(r.Position + Vector3.new(0, 5, 0))) end
-                return
-            end
-            for i, v in lplr.Character:GetChildren() do if v:IsA('Tool') then v.Parent = lplr.Backpack end end
-            info.Text = 'stomping (' .. target.Name .. ')'
-            local lt = target.Character:FindFirstChild('LowerTorso') or target.Character:FindFirstChild('HumanoidRootPart')
-            if lt then utils.update(CFrame.new(lt.Position + Vector3.new(0, stomp_offset or 4, 0))) end
-            lplr.Character.HumanoidRootPart.Velocity = Vector3.zero
-            replicated.MainEvent:FireServer('Stomp')
-            return
-        end
-
-        if not (killing or stomping) then
-            if showtarget then
-                local showpos = show and utils:getposition(players:FindFirstChild(showtarget)) or nil
-                utils.update(showpos and showpos + Vector3.new(0, 4, 4) or CFrame.new(x(), yy(), x()))
-            end
-            if void and not showtarget then utils.update(CFrame.new(x(), yy(), x())) end
-        end
-    end)
-end)
-
--- Auto-buy guns — แยก task เพราะ purchase() ต้อง yield
+-- Main combat loop — TP on top of player, shoot, void when done
 task.spawn(function()
-    repeat task.wait(0.5)
+    repeat task.wait()
         pcall(function()
-            if not localent.Alive or #guns > 0 or killing or stomping then return end
-            local dg = altcontrol.default_guns or {'rifle', 'flintlock'}
-            for _, gunkey in dg do
-                local status = nil
-                for k, v in pguns do
-                    if k:find(gunkey, 1, true) then status = v; break end
+            if localent.Alive and target and killing then
+                if bodyeffects.get(lplr, 'Reload') then utils.update(CFrame.new(x(), yy(), x())); return end
+                if bodyeffects.get(target, 'K.O') or not players:FindFirstChild(target.Name) then return end                local target_position = utils:getposition(target)
+                if not target_position or not target.Character then return end
+
+                -- Buy guns if we have none
+                if #guns == 0 then
+                    local dg = altcontrol.default_guns or {'rifle', 'flintlock'}
+                    for i, v in dg do
+                        if pguns[v] then
+                            local status = pguns[v]
+                            if not status or not localent.Alive then continue end
+                            local weapon = status.name:gsub('%s*%- %$%d+', '')
+                            if lplr.Backpack and lplr.Character and not lplr.Backpack:FindFirstChild(weapon) and not lplr.Character:FindFirstChild(weapon) then
+                                info.Text = 'buying ' .. v
+                                utils.purchase('weapon', status.name)
+                            end
+                        end
+                    end
+                    return
                 end
-                if not status then continue end
-                local weapon = status.name:gsub('%[',''):gsub('%]',''):gsub('%s*%- %$%d+',''):gsub('^%s+',''):gsub('%s+$','')
-                if lplr.Backpack:FindFirstChild(weapon) or lplr.Character:FindFirstChild(weapon) then continue end
-                info.Text = 'buying ' .. gunkey
-                utils.purchase('weapon', status.name)
-                task.wait(0.3)
+
+                -- Check forcefield
+                if target.Character:FindFirstChildOfClass('ForceField') then
+                    info.Text = 'target has forcefield - waiting'
+                    utils.update(CFrame.new(x(), yy(), x()))
+                    return
+                end
+
+                -- Camera follow target
+                if target.Character:FindFirstChild('Humanoid') then
+                    camera.CameraSubject = target.Character.Humanoid
+                end
+
+                -- Handle GRABBING_CONSTRAINT redirect
+                if target.Character:FindFirstChild('GRABBING_CONSTRAINT') then
+                    local a = target.Character:FindFirstChild('GRABBING_CONSTRAINT')
+                    if a:GetAttribute('PLAYER_HOLD') then
+                        local nt = utils.getname(a:GetAttribute('PLAYER_HOLD'))
+                        if nt then target = nt end
+                    end
+                end
+
+                -- TP on top of player and shoot
+                local hum = target.Character.Humanoid
+                info.Text = 'shooting (' .. target.Name .. ') | hp: ' .. math.floor((hum.Health / hum.MaxHealth) * 100) .. '%'
+
+                for _, v in guns do
+                    if not lplr or not lplr.Character or not target or not target.Character then continue end
+                    v.Parent = lplr.Character
+                    if v and v:FindFirstChild('Ammo') and not buyinammo then
+                        if v.Ammo.Value == 0 and utils.getfullammo(v) ~= 0 then
+                            utils.reload(v)
+                            continue
+                        end
+                        if target.Character:FindFirstChild('Head') then
+                            -- TP above target (high enough to avoid fling)
+                            utils.update(CFrame.new(target_position.p + Vector3.new(0, 7, 0)))
+                            -- Fire 2 shots per gun for speed
+                            for _ = 1, 2 do
+                                utils.shoot({
+                                    startposition = target_position.p + Vector3.new(0, seed:NextInteger(1, 5), 0),
+                                    position = target_position.p,
+                                    part = target.Character.Head,
+                                    tool = v
+                                })
+                            end
+                        end
+                    end
+                end
+            end
+
+            -- Stomping — TP on top and stomp
+            if stomping and target and target.Character then
+                if bodyeffects.get(lplr, 'Reload') then utils.update(CFrame.new(x(), yy(), x())); return end
+                for i, v in lplr.Character:GetChildren() do if v:IsA('Tool') then v.Parent = lplr.Backpack end end
+                info.Text = 'stomping (' .. target.Name .. ')'
+                utils.update(CFrame.new(target.Character.LowerTorso.Position + Vector3.new(0, stomp_offset or 4, 0)))
+                lplr.Character.HumanoidRootPart.Velocity = Vector3.zero
+                replicated.MainEvent:FireServer('Stomp')
+            end
+
+            -- Idle — void or follow
+            if not (killing or stomping) then
+                if showtarget then
+                    local showpos = show and utils:getposition(players:FindFirstChild(showtarget)) or nil
+                    utils.update(showpos and showpos + Vector3.new(0, 4, 4) or CFrame.new(x(), yy(), x()))
+                end
+                if void and not showtarget then utils.update(CFrame.new(x(), yy(), x())) end
             end
         end)
     until not game
@@ -741,41 +725,13 @@ task.spawn(function()
     until not game
 end)
 
--- Anti-stomp sentry: if owner gets KO'd, kill whoever is near them (stomping)
-task.spawn(function()
-    repeat task.wait(0.2)
-        if not sentry or stop or killing or stomping then continue end
-        pcall(function()
-            for _, ownerName in altcontrol.owners do
-                local owner = players:FindFirstChild(ownerName)
-                if not owner or not owner.Character or not owner.Character:FindFirstChild('HumanoidRootPart') then continue end
-                
-                -- Owner is KO'd — someone might be stomping
-                if bodyeffects.get(owner, 'K.O') and not bodyeffects.get(owner, 'SDeath') then
-                    local ownerPos = owner.Character.HumanoidRootPart.Position
-                    -- Find closest enemy standing on top of owner (stomping)
-                    local closest, closestDist = nil, 12
-                    for _, v in players:GetPlayers() do
-                        if v == lplr or v.Name == ownerName or table.find(altcontrol.owners, v.Name) or table.find(whitelist, v.Name) then continue end
-                        if not v.Character or not v.Character:FindFirstChild('HumanoidRootPart') then continue end
-                        if bodyeffects.get(v, 'K.O') or bodyeffects.get(v, 'SDeath') then continue end
-                        local dist = (ownerPos - v.Character.HumanoidRootPart.Position).Magnitude
-                        if dist < closestDist then closest = v; closestDist = dist end
-                    end
-                    if closest and not killing then
-                        pcall(function() wsSend({type='log', msg='[sentry] ' .. closest.Name .. ' stomping ' .. ownerName .. ' — killing'}) end)
-                        target = closest; killing = true
-                    end
-                end
-            end
-        end)
-    until not game
-end)
-
--- Sentry + Assist — Heartbeat HP-delta + queue (ไวกว่า ClientBullet + 0.15s poll มาก)
-local _sentryHP    = {}
-local _assistHP    = {}
-local _engageQueue = {}
+-- ══════════════════════════════════════════════════════════════════════════════
+-- SENTRY + ASSIST (improved) — Heartbeat HP-delta + kill queue
+-- แทน ClientBullet (miss ถ้ายิงพลาด) + task.wait(0.15) poll (ช้า 150ms)
+-- ══════════════════════════════════════════════════════════════════════════════
+local _sentryHP    = {}  -- [ownerName] = lastHP
+local _assistHP    = {}  -- [playerName] = lastHP
+local _engageQueue = {}  -- {name, reason}
 
 local function queueEngage(plr, reason)
     if not plr or not plr.Character then return end
@@ -783,10 +739,10 @@ local function queueEngage(plr, reason)
     if plr.Character:FindFirstChildOfClass('ForceField') then return end
     for _, e in _engageQueue do if e.name == plr.Name then return end end
     table.insert(_engageQueue, {name = plr.Name, reason = reason})
-    pcall(function() wsSend({type='log', msg='[' .. reason .. '] queued ' .. plr.Name}) end)
+    pcall(function() wsSend({type='log', msg='[' .. reason .. '] queued ' .. plr.Name .. ' (' .. #_engageQueue .. ')'}) end)
 end
 
--- Worker: kill+stomp ทีละคนจาก queue ไม่หยุด
+-- Worker: ดึง queue มา kill+stomp ทีละคน ไม่หยุด
 task.spawn(function()
     while true do
         task.wait(0.05)
@@ -796,23 +752,31 @@ task.spawn(function()
         if not plr or not plr.Character then continue end
         if bodyeffects.get(plr, 'K.O') or bodyeffects.get(plr, 'SDeath') then continue end
         if plr.Character:FindFirstChildOfClass('ForceField') then continue end
+
         pcall(function() wsSend({type='log', msg='[' .. entry.reason .. '] killing ' .. entry.name}) end)
         target = plr; killing = true
         repeat task.wait(0.05) until not killing or stop or not players:FindFirstChild(entry.name)
-        local dead = players:FindFirstChild(entry.name)
-        if dead and bodyeffects.get(dead, 'K.O') and not bodyeffects.get(dead, 'SDeath') then
-            target = dead; stomping = true
-            repeat task.wait(0.05) until not stomping or stop or bodyeffects.get(dead, 'SDeath') or not players:FindFirstChild(entry.name)
+
+        -- auto stomp หลัง kill
+        if sentry or assist then
+            local dead = players:FindFirstChild(entry.name)
+            if dead and bodyeffects.get(dead, 'K.O') and not bodyeffects.get(dead, 'SDeath') then
+                pcall(function() wsSend({type='log', msg='[' .. entry.reason .. '] stomping ' .. entry.name}) end)
+                target = dead; stomping = true
+                repeat task.wait(0.05) until not stomping or stop or bodyeffects.get(dead, 'SDeath') or not players:FindFirstChild(entry.name)
+            end
         end
         target = nil
         task.wait(0.1)
     end
 end)
 
--- HP watcher: Heartbeat ~60Hz detect ทุก damage ทันที
+-- HP watcher: Heartbeat ~60Hz — detect ทุก damage (gun/punch/melee) ทันที
 runservice.Heartbeat:Connect(function()
     if stop then return end
     pcall(function()
+
+        -- SENTRY: owner HP ลด → หาคนที่ใกล้ที่สุด → queue kill
         if sentry then
             for _, ownerName in altcontrol.owners do
                 local owner = players:FindFirstChild(ownerName)
@@ -824,6 +788,7 @@ runservice.Heartbeat:Connect(function()
                 local prev = _sentryHP[ownerName] or hp
                 _sentryHP[ownerName] = hp
                 if hp < prev and hp > 0 then
+                    -- หาคนใกล้ owner ที่สุด (ผู้โจมตี) radius 80 studs
                     local closest, closestDist = nil, 80
                     for _, v in players:GetPlayers() do
                         if v == lplr or table.find(altcontrol.owners, v.Name) or table.find(whitelist, v.Name) then continue end
@@ -836,11 +801,17 @@ runservice.Heartbeat:Connect(function()
                 end
             end
         end
+
+        -- ASSIST: enemy HP ลดขณะ owner อยู่ใกล้ (radius 60) → queue kill
         if assist then
             for _, v in players:GetPlayers() do
                 if v == lplr or table.find(altcontrol.owners, v.Name) or table.find(whitelist, v.Name) then continue end
-                if not v.Character or not v.Character:FindFirstChild('Humanoid') or not v.Character:FindFirstChild('HumanoidRootPart') then _assistHP[v.Name] = nil; continue end
-                if v.Character:FindFirstChildOfClass('ForceField') or bodyeffects.get(v, 'K.O') or bodyeffects.get(v, 'SDeath') then _assistHP[v.Name] = nil; continue end
+                if not v.Character or not v.Character:FindFirstChild('Humanoid') or not v.Character:FindFirstChild('HumanoidRootPart') then
+                    _assistHP[v.Name] = nil; continue
+                end
+                if v.Character:FindFirstChildOfClass('ForceField') or bodyeffects.get(v, 'K.O') or bodyeffects.get(v, 'SDeath') then
+                    _assistHP[v.Name] = nil; continue
+                end
                 local hp   = v.Character.Humanoid.Health
                 local prev = _assistHP[v.Name] or hp
                 _assistHP[v.Name] = hp
@@ -855,9 +826,37 @@ runservice.Heartbeat:Connect(function()
                     end
                 end
             end
-            for name in pairs(_assistHP) do if not players:FindFirstChild(name) then _assistHP[name] = nil end end
+            for name in pairs(_assistHP) do
+                if not players:FindFirstChild(name) then _assistHP[name] = nil end
+            end
         end
+
     end)
+end)
+
+-- Anti-stomp sentry: owner KO'd → kill stomper (คงไว้เหมือนเดิม)
+task.spawn(function()
+    repeat task.wait(0.2)
+        if not sentry or stop or killing or stomping then continue end
+        pcall(function()
+            for _, ownerName in altcontrol.owners do
+                local owner = players:FindFirstChild(ownerName)
+                if not owner or not owner.Character or not owner.Character:FindFirstChild('HumanoidRootPart') then continue end
+                if bodyeffects.get(owner, 'K.O') and not bodyeffects.get(owner, 'SDeath') then
+                    local ownerPos = owner.Character.HumanoidRootPart.Position
+                    local closest, closestDist = nil, 12
+                    for _, v in players:GetPlayers() do
+                        if v == lplr or v.Name == ownerName or table.find(altcontrol.owners, v.Name) or table.find(whitelist, v.Name) then continue end
+                        if not v.Character or not v.Character:FindFirstChild('HumanoidRootPart') then continue end
+                        if bodyeffects.get(v, 'K.O') or bodyeffects.get(v, 'SDeath') then continue end
+                        local dist = (ownerPos - v.Character.HumanoidRootPart.Position).Magnitude
+                        if dist < closestDist then closest = v; closestDist = dist end
+                    end
+                    if closest then queueEngage(closest, 'sentry-stomp') end
+                end
+            end
+        end)
+    until not game
 end)
 
 -- Kill aura
